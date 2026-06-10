@@ -65,8 +65,9 @@ in sections **grouped by account** → delivered to Telegram/WhatsApp + Notion.
 
 ## Environments
 
-- **Dev**: MacBook, n8n via Docker Desktop. `N8N_HOST=n8n.localhost` →
-  Caddy serves an internal-CA cert (no public DNS).
+- **Dev**: MacBook, n8n via Docker Desktop. Local repo lives at
+  `~/Developer/Agents` (run all `make` commands from there).
+  `N8N_HOST=n8n.localhost` → Caddy serves an internal-CA cert (no public DNS).
 - **Prod**: rented Ubuntu **VPS**, reached over **Tailscale**, n8n behind
   **Caddy** for automatic HTTPS (Let's Encrypt on a real domain).
 - **Git is the source of truth** for BOTH the infrastructure AND the exported
