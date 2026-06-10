@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/slaftercndt/agents/schemas/action.schema.json",
+  "title": "Agent Action Envelope",
+  "description": "Shared contract for every action ANY of the four agents proposes. The Chief of Staff (phase 1) is read-only and emits only `mode: \"report\"` items, but it MUST already emit them in this shape so the Executive Assistant, CRM, and Media agents can reuse the exact same approval pipeline without rework. The human approval UI keys off `mode`: `auto` actions execute without asking, `approve` actions wait for an explicit yes.",
+  "type": "object",
+  "required": ["agent", "generated_at", "actions"],
+  "properties": {
+    "agent": {
+      "type": "string",
+      "description": "Which agent produced this batch.",
+      "enum": ["chief-of-staff", "executive-assistant", "crm", "media-positioning"]
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of when this batch was produced."
+    },
+    "actions": {
+      "type": "array",
+      "description": "Ordered list of proposed actions / report items.",
+      "items": { "$ref": "#/$defs/action" }
+    }
+  },
+  "$defs": {
+    "action": {
+      "type": "object",
+      "required": ["id", "mode", "type", "summary"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable unique id for this action (for approval callbacks)."
+        },
+        "mode": {
+          "type": "string",
+          "description": "auto = execute without asking; approve = require explicit human yes before acting; report = informational only, never executes (the Chief of Staff uses this).",
+          "enum": ["auto", "approve", "report"]
+        },
+        "type": {
+          "type": "string",
+          "description": "What the action is, e.g. brief.section, email.draft, email.send, calendar.create, crm.note, post.publish."
+        },
+        "account": {
+          "type": "string",
+          "description": "Source/target account this relates to. Used for grouping the brief. GiveSendGo Charities sorts first.",
+          "enum": ["givesendgo", "gmail", "outlook", "nextcloud", "fourth", "calendar", "other"]
+        },
+        "priority": {
+          "type": "integer",
+          "description": "Sort order within the brief. GiveSendGo = 1 (first).",
+          "minimum": 1
+        },
+        "summary": {
+          "type": "string",
+          "description": "One-line human-readable description of the action / item."
+        },
+        "detail": {
+          "type": "string",
+          "description": "Optional longer body (e.g. the brief section text, or a draft)."
+        },
+        "payload": {
+          "type": "object",
+          "description": "Action-specific structured data the executing node needs (e.g. draft body, event fields). Empty for report items.",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

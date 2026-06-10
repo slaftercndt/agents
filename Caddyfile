@@ -1,0 +1,42 @@
+# =============================================================================
+# Caddyfile — automatic-HTTPS reverse proxy in front of n8n.
+#
+# Caddy obtains and renews TLS certificates automatically:
+#   - PRODUCTION : {$N8N_HOST} is a real public domain (e.g. n8n.example.com).
+#                  Caddy fetches a free Let's Encrypt cert over ports 80/443.
+#                  Point your domain's DNS A/AAAA record at the VPS first.
+#   - LOCAL DEV  : set N8N_HOST=n8n.localhost in .env. Any *.localhost host is
+#                  served by Caddy's OWN internal CA automatically — no public
+#                  DNS, no Let's Encrypt. (Your browser will warn once; trust
+#                  it, or run `make trust-local-cert`.) Same file, zero edits.
+#
+# {$VAR} values are read from the caddy container's environment (set in
+# docker-compose.yml from your gitignored .env).
+# =============================================================================
+
+{
+	# Email Let's Encrypt uses for expiry/renewal notices (prod only; ignored
+	# for *.localhost). Set ACME_EMAIL in .env.
+	email {$ACME_EMAIL}
+}
+
+# The site block. {$N8N_HOST} expands to your domain (or n8n.localhost).
+{$N8N_HOST} {
+	# Forward everything to the n8n container on the internal Docker network.
+	# n8n listens on 5678; only Caddy can reach it (it isn't published).
+	reverse_proxy n8n:5678 {
+		# Long-lived connections for n8n's editor (push/websocket) and webhooks.
+		flush_interval -1
+	}
+
+	# Compress responses.
+	encode zstd gzip
+
+	# Basic security headers. n8n is the only app served here.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}

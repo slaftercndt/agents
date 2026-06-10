@@ -1,0 +1,142 @@
+# =============================================================================
+# docker-compose.yml
+#
+# ONE compose file for BOTH environments:
+#   - Local dev  : MacBook + Docker Desktop
+#   - Production : Ubuntu VPS (reached over Tailscale, fronted by Caddy)
+#
+# What you test locally is what ships. The ONLY thing that differs between
+# environments is the gitignored .env file (domain, secrets, timezone).
+# Nothing environment-specific belongs in this file.
+#
+# Stack: PostgreSQL (n8n's DB) + n8n (workflow engine) + Caddy (HTTPS proxy).
+# This same stack will serve all four agents (Chief of Staff now; EA, CRM,
+# and Media & Positioning later) — they share this n8n instance and this DB.
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — n8n's database.
+  # We deliberately use Postgres, NOT n8n's default SQLite, so dev and prod
+  # behave identically and the DB holds up under real workflow volume and the
+  # future multi-agent load. Data lives in a named volume (see bottom of file).
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine          # major version pinned; data dir is tied to the major
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      # Keep the data subdir explicit so backups/restores are predictable.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # n8n won't start until Postgres actually answers queries.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # NOT published to the host. Only reachable on the internal compose network
+    # by the n8n container. Nothing outside Docker can touch the database.
+    expose:
+      - "5432"
+
+  # ---------------------------------------------------------------------------
+  # n8n — the workflow engine and the reasoning orchestrator.
+  # The Chief of Staff workflow (and later agents) live here. Credentials
+  # (4 email accounts, Telegram/WhatsApp, Notion, the Claude API key) are
+  # entered in the n8n UI and stored ENCRYPTED in Postgres — never in Git.
+  # ---------------------------------------------------------------------------
+  n8n:
+    # PINNED to a specific version (never :latest) for reproducible deploys.
+    # Before bumping, read the release notes + breaking changes:
+    #   https://github.com/n8n-io/n8n/releases
+    image: n8nio/n8n:1.110.1
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy     # wait for the DB healthcheck above
+    environment:
+      # --- Database connection (points at the postgres service above) --------
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+
+      # --- Host / URLs -------------------------------------------------------
+      # Caddy terminates TLS in front of n8n, so n8n itself speaks plain HTTP
+      # on 5678 inside the Docker network, but must KNOW its public https URL
+      # for webhooks, OAuth redirects, and the editor links to be correct.
+      N8N_HOST: ${N8N_HOST}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: https
+      WEBHOOK_URL: https://${N8N_HOST}/
+      N8N_EDITOR_BASE_URL: https://${N8N_HOST}/
+      # We're behind exactly one reverse proxy (Caddy). Trust its forwarded
+      # headers so n8n sees real client IPs and the correct protocol.
+      N8N_PROXY_HOPS: 1
+
+      # --- Security ----------------------------------------------------------
+      # Encrypts saved credentials at rest in Postgres. If this key changes,
+      # ALL stored credentials become unreadable. It lives ONLY in .env and is
+      # never committed. Generate once, then never change it (back it up).
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+      # Cookie only sent over HTTPS (safe because Caddy gives us real TLS).
+      N8N_SECURE_COOKIE: "true"
+
+      # --- Timezone ----------------------------------------------------------
+      # The Chief of Staff brief fires at 05:30. Cron uses this timezone, so
+      # set it to YOUR timezone in .env (e.g. America/New_York).
+      GENERIC_TIMEZONE: ${TZ}
+      TZ: ${TZ}
+
+      # --- Housekeeping ------------------------------------------------------
+      N8N_DIAGNOSTICS_ENABLED: "false"          # no telemetry
+      N8N_HIRING_BANNER_ENABLED: "false"
+      N8N_RUNNERS_ENABLED: "true"               # task runners (recommended)
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      # Git-tracked workflow exports, mounted read-only. `make import-workflow`
+      # reads chief-of-staff.json (and future agents' JSON) from here.
+      - ./workflows:/workflows:ro
+    expose:
+      - "5678"                                  # internal only; Caddy proxies it
+
+  # ---------------------------------------------------------------------------
+  # Caddy — automatic-HTTPS reverse proxy.
+  # PROD : N8N_HOST is your real domain -> Caddy gets a Let's Encrypt cert.
+  # LOCAL: set N8N_HOST=n8n.localhost     -> Caddy serves its own internal CA
+  #        cert automatically (no public DNS needed). Same Caddyfile, no edits.
+  # ---------------------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - n8n
+    ports:
+      - "80:80"                                 # HTTP (ACME challenge + redirect)
+      - "443:443"                               # HTTPS
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data                        # persisted TLS certs — DO NOT lose
+      - caddy_config:/config
+    environment:
+      # Caddy reads these with {$VAR} syntax inside the Caddyfile.
+      N8N_HOST: ${N8N_HOST}
+      ACME_EMAIL: ${ACME_EMAIL}
+
+# -----------------------------------------------------------------------------
+# Named volumes. These live OUTSIDE the repo (managed by Docker), so secrets
+# and runtime data are never accidentally committed. Back up postgres_data
+# (via `make backup`) and caddy_data (your certs).
+# -----------------------------------------------------------------------------
+volumes:
+  postgres_data:
+  n8n_data:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,36 @@
+# =============================================================================
+# .gitignore — keep secrets and runtime data OUT of the repo.
+# Hard rule: credentials and API keys never get committed.
+# =============================================================================
+
+# --- Secrets ------------------------------------------------------------------
+# The real environment file. Only .env.example (placeholders) is tracked.
+.env
+.env.*
+!.env.example
+
+# --- n8n / database runtime data ----------------------------------------------
+# We use Docker named volumes (not bind mounts), so this is belt-and-suspenders
+# in case anyone switches to local-folder mounts. Never commit n8n data — it
+# contains the encrypted credentials store.
+.n8n/
+n8n_data/
+postgres_data/
+caddy_data/
+caddy_config/
+data/
+
+# --- Backups ------------------------------------------------------------------
+# `make backup` writes timestamped pg_dumps here. Keep them off Git.
+backups/
+
+# --- TLS / keys ---------------------------------------------------------------
+*.pem
+*.key
+*.crt
+
+# --- OS / editor cruft --------------------------------------------------------
+.DS_Store
+*.swp
+.idea/
+.vscode/

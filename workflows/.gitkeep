@@ -1,0 +1,11 @@
+# Exported n8n workflow JSON lives here. Git is the source of truth.
+#
+# Build a workflow in the n8n visual editor, then export it to this directory
+# (use `make export-workflows`) and commit the JSON. n8n strips credentials on
+# export, so these files are safe to commit — keep it that way.
+#
+# Expected files as the system grows:
+#   chief-of-staff.json        (phase 1 — built now)
+#   executive-assistant.json   (later)
+#   crm.json                   (later)
+#   media-positioning.json     (later)
