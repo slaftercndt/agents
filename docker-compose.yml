@@ -53,7 +53,7 @@ services:
     # PINNED to a specific version (never :latest) for reproducible deploys.
     # Before bumping, read the release notes + breaking changes:
     #   https://github.com/n8n-io/n8n/releases
-    image: n8nio/n8n:1.110.1
+    image: n8nio/n8n:2.25.7
     restart: unless-stopped
     depends_on:
       postgres:
@@ -97,7 +97,6 @@ services:
       # --- Housekeeping ------------------------------------------------------
       N8N_DIAGNOSTICS_ENABLED: "false"          # no telemetry
       N8N_HIRING_BANNER_ENABLED: "false"
-      N8N_RUNNERS_ENABLED: "true"               # task runners (recommended)
       N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
     volumes:
       - n8n_data:/home/node/.n8n
