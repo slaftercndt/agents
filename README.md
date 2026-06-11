@@ -33,6 +33,19 @@ cp .env.example .env          # then edit .env:
 make up                       # start n8n + Postgres + Caddy
 ```
 
+> **Set `POSTGRES_PASSWORD` *before* the first `make up`.** Postgres reads it
+> **only once**, when it first creates its data volume. Editing `.env` afterward
+> does **not** change the live database — you'd then get
+> `password authentication failed`. To change it on an already-running stack:
+> ```bash
+> docker compose exec postgres psql -U n8n -d n8n -c "ALTER USER n8n WITH PASSWORD 'NEW_VALUE';"
+> # set the same NEW_VALUE in .env, then:
+> docker compose up -d
+> ```
+> The **same value** must also go into the n8n **Postgres credential** (the
+> workflows that read/write `brief_items` use it). Host there is `postgres`
+> (the compose service name), not `localhost`.
+
 Open **https://n8n.localhost**. Caddy serves a local-CA cert, so your browser
 warns once — trust it, or run `make trust-local-cert` (macOS) to silence it.
 Create the n8n owner account, build the workflow, then:
