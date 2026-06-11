@@ -1,0 +1,115 @@
+{
+  "id": "chiefofstaffingest01",
+  "active": false,
+  "name": "Chief of Staff - Ingest",
+  "nodes": [
+    {
+      "parameters": {
+        "format": "simple",
+        "mailbox": "INBOX",
+        "postProcessAction": "nothing",
+        "options": {}
+      },
+      "id": "node-imap-gmail",
+      "name": "Gmail Inbox (IMAP)",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2,
+      "position": [-100, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "asg-account", "name": "account", "value": "gmail", "type": "string" },
+            { "id": "asg-priority", "name": "priority", "value": 2, "type": "number" }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "node-tag",
+      "name": "Tag: gmail (priority 2)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [140, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Free pre-filter — drop old mail + newsletters/bulk, trim each item.\n// Reads {account, priority} from the Tag node and email fields from IMAP.\nconst CUTOFF = Date.now() - 24 * 60 * 60 * 1000;\nconst out = [];\nfor (const item of $input.all()) {\n  const e = item.json;\n  const from = (e.from || '').toString();\n  const subject = (e.subject || '').toString();\n  const body = (e.snippet || e.textPlain || e.text || '').toString();\n  const ts = e.date ? new Date(e.date).getTime() : Date.now();\n  if (ts && ts < CUTOFF) continue;\n  const headers = JSON.stringify(e.headers || {}).toLowerCase();\n  const isBulk = headers.includes('list-unsubscribe') || /no-?reply|newsletter|notifications?@/i.test(from);\n  if (isBulk) continue;\n  out.push({ json: {\n    account: e.account || 'other',\n    priority: e.priority || 2,\n    from,\n    subject,\n    snippet: body.replace(/\\s+/g, ' ').trim().slice(0, 600),\n    date: e.date || null\n  } });\n}\nreturn out;"
+      },
+      "id": "node-prefilter",
+      "name": "Free Pre-Filter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [380, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "anthropic-version", "value": "2023-06-01" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-haiku-4-5', max_tokens: 150, system: 'Triage this email for a daily executive brief. Reply with ONLY a JSON object with two keys: classification (one of needs_reply, fyi, ignore) and one_line (a max 12 word summary). No other text.', messages: [{ role: 'user', content: 'Account: ' + $json.account + ' | From: ' + $json.from + ' | Subject: ' + $json.subject + ' | Body: ' + $json.snippet }] }) }}",
+        "options": {}
+      },
+      "id": "node-haiku",
+      "name": "Haiku Triage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [620, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pair each Haiku response with its email (index-aligned), parse the\n// classification, and drop anything triaged as 'ignore'. Output rows ready\n// to INSERT into brief_items.\nconst emails = $('Free Pre-Filter').all();\nconst all = $input.all();\nconst out = [];\nfor (let i = 0; i < all.length; i++) {\n  const email = emails[i] ? emails[i].json : {};\n  let text = '';\n  try { text = all[i].json.content[0].text; } catch (e) {}\n  let parsed = { classification: 'fyi', one_line: email.subject || '' };\n  try { parsed = JSON.parse(text); } catch (e) {}\n  if (parsed.classification === 'ignore') continue;\n  out.push({ json: {\n    account: email.account || 'other',\n    priority: email.priority || 2,\n    from: email.from || '',\n    subject: email.subject || '',\n    one_line: parsed.one_line || email.subject || '',\n    classification: parsed.classification || 'fyi'\n  } });\n}\nreturn out;"
+      },
+      "id": "node-parse",
+      "name": "Parse Triage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [860, 300]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": { "__rl": true, "mode": "list", "value": "public" },
+        "table": { "__rl": true, "mode": "list", "value": "brief_items" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "account": "={{ $json.account }}",
+            "priority": "={{ $json.priority }}",
+            "from_addr": "={{ $json.from }}",
+            "subject": "={{ $json.subject }}",
+            "one_line": "={{ $json.one_line }}",
+            "classification": "={{ $json.classification }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "node-pg-insert",
+      "name": "Save to Postgres",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [1100, 300]
+    }
+  ],
+  "connections": {
+    "Gmail Inbox (IMAP)": { "main": [[{ "node": "Tag: gmail (priority 2)", "type": "main", "index": 0 }]] },
+    "Tag: gmail (priority 2)": { "main": [[{ "node": "Free Pre-Filter", "type": "main", "index": 0 }]] },
+    "Free Pre-Filter": { "main": [[{ "node": "Haiku Triage", "type": "main", "index": 0 }]] },
+    "Haiku Triage": { "main": [[{ "node": "Parse Triage", "type": "main", "index": 0 }]] },
+    "Parse Triage": { "main": [[{ "node": "Save to Postgres", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}
