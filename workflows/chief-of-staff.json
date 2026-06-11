@@ -1,0 +1,148 @@
+{
+  "name": "Chief of Staff",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "days", "triggerAtHour": 5, "triggerAtMinute": 30 }
+          ]
+        }
+      },
+      "id": "node-schedule",
+      "name": "Daily 05:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-80, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// STUB — replace this node with your four real email input branches\n// (IMAP / Gmail / Microsoft Outlook / NextCloud). Each real branch should\n// output items shaped like the objects below: {account, priority, from,\n// subject, snippet, date, headers}. GiveSendGo Charities is priority 1.\nconst now = new Date().toISOString();\nreturn [\n  { json: { account: 'givesendgo', priority: 1, from: 'donor@example.org', subject: 'Recurring gift failed to process', snippet: 'Our monthly gift did not go through this month — can you help sort it out today?', date: now, headers: {} } },\n  { json: { account: 'gmail', priority: 2, from: 'jane@partner.com', subject: 'Contract redline ready for review', snippet: 'Sending the redlined MSA back for your review before Friday.', date: now, headers: {} } },\n  { json: { account: 'outlook', priority: 2, from: 'no-reply@newsletter.com', subject: 'Your weekly digest', snippet: 'Top stories this week and a few picks for you...', date: now, headers: { 'list-unsubscribe': '<https://unsub.example>' } } },\n  { json: { account: 'nextcloud', priority: 2, from: 'ops@vendor.io', subject: 'Invoice #4821 now overdue', snippet: 'A friendly reminder that invoice 4821 is 14 days overdue.', date: now, headers: {} } }\n];"
+      },
+      "id": "node-mock",
+      "name": "Mock Inboxes (replace me)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [160, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Free pre-filter — runs BEFORE any Claude call to keep cost down.\n// 1) drop mail older than 24h, 2) drop newsletters/bulk, 3) trim each item.\nconst CUTOFF = Date.now() - 24 * 60 * 60 * 1000;\nconst out = [];\nfor (const item of $input.all()) {\n  const e = item.json;\n  const from = (e.from || '').toString();\n  const subject = (e.subject || '').toString();\n  const body = (e.snippet || e.text || e.textPlain || '').toString();\n  const ts = e.date ? new Date(e.date).getTime() : Date.now();\n  if (ts && ts < CUTOFF) continue;\n  const headers = JSON.stringify(e.headers || {}).toLowerCase();\n  const isBulk = headers.includes('list-unsubscribe') || /no-?reply|newsletter|notifications?@/i.test(from);\n  if (isBulk) continue;\n  out.push({ json: {\n    account: e.account || 'other',\n    priority: e.priority || 2,\n    from,\n    subject,\n    snippet: body.replace(/\\s+/g, ' ').trim().slice(0, 600),\n    date: e.date || null\n  } });\n}\nreturn out;"
+      },
+      "id": "node-prefilter",
+      "name": "Free Pre-Filter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "anthropic-version", "value": "2023-06-01" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-haiku-4-5', max_tokens: 150, system: 'Triage this email for a daily executive brief. Reply with ONLY a JSON object with two keys: classification (one of needs_reply, fyi, ignore) and one_line (a max 12 word summary). No other text.', messages: [{ role: 'user', content: 'Account: ' + $json.account + ' | From: ' + $json.from + ' | Subject: ' + $json.subject + ' | Body: ' + $json.snippet }] }) }}",
+        "options": {}
+      },
+      "id": "node-haiku",
+      "name": "Haiku Triage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pair each Haiku response back with its email (index-aligned), parse the\n// classification, and drop anything triaged as 'ignore'.\nconst emails = $('Free Pre-Filter').all();\nconst all = $input.all();\nconst out = [];\nfor (let i = 0; i < all.length; i++) {\n  const email = emails[i] ? emails[i].json : {};\n  let text = '';\n  try { text = all[i].json.content[0].text; } catch (e) {}\n  let parsed = { classification: 'fyi', one_line: email.subject || '' };\n  try { parsed = JSON.parse(text); } catch (e) {}\n  if (parsed.classification === 'ignore') continue;\n  out.push({ json: { ...email, classification: parsed.classification || 'fyi', one_line: parsed.one_line || email.subject || '' } });\n}\nreturn out;"
+      },
+      "id": "node-attach",
+      "name": "Attach Triage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Group triaged items by account (GiveSendGo first) and build ONE prompt\n// for the single Sonnet synthesis pass.\nconst items = $input.all().map(i => i.json);\nconst order = { givesendgo: 1, gmail: 2, outlook: 3, nextcloud: 4 };\nitems.sort((a, b) => (a.priority - b.priority) || ((order[a.account] || 9) - (order[b.account] || 9)));\nconst byAccount = {};\nfor (const it of items) { (byAccount[it.account] = byAccount[it.account] || []).push(it); }\nconst accounts = Object.keys(byAccount).sort((a, b) => (order[a] || 9) - (order[b] || 9));\nlet input = '';\nfor (const acc of accounts) {\n  input += '\\n## ' + acc + '\\n';\n  for (const it of byAccount[acc]) {\n    input += '- [' + it.classification + '] ' + it.from + ' \\u2014 ' + it.subject + ' :: ' + (it.one_line || '') + '\\n';\n  }\n}\nconst synthSystem = 'You are a Chief of Staff writing one concise daily morning brief. Group strictly by account in the order given. GiveSendGo Charities MUST appear first. Within each account, list needs_reply items before fyi. Be terse and scannable, markdown headers, no invented items.';\nconst synthUser = 'Write the morning brief from these triaged items, grouped by account (GiveSendGo first):\\n' + input;\nreturn [{ json: { synthSystem, synthUser } }];"
+      },
+      "id": "node-buildprompt",
+      "name": "Build Brief Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "anthropic-version", "value": "2023-06-01" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2000, system: $json.synthSystem, messages: [{ role: 'user', content: $json.synthUser }] }) }}",
+        "options": {}
+      },
+      "id": "node-sonnet",
+      "name": "Sonnet Synthesis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1360, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pull the brief text out of the Sonnet response.\nlet text = '';\ntry { text = $input.first().json.content[0].text; } catch (e) { text = '(no brief generated)'; }\nreturn [{ json: { brief: text } }];"
+      },
+      "id": "node-extract",
+      "name": "Extract Brief",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1600, 300]
+    },
+    {
+      "parameters": {},
+      "id": "node-deliver-chat",
+      "name": "Deliver - Telegram or WhatsApp",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1840, 200]
+    },
+    {
+      "parameters": {},
+      "id": "node-deliver-notion",
+      "name": "Deliver - Notion",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1840, 400]
+    }
+  ],
+  "connections": {
+    "Daily 05:30": { "main": [[{ "node": "Mock Inboxes (replace me)", "type": "main", "index": 0 }]] },
+    "Mock Inboxes (replace me)": { "main": [[{ "node": "Free Pre-Filter", "type": "main", "index": 0 }]] },
+    "Free Pre-Filter": { "main": [[{ "node": "Haiku Triage", "type": "main", "index": 0 }]] },
+    "Haiku Triage": { "main": [[{ "node": "Attach Triage", "type": "main", "index": 0 }]] },
+    "Attach Triage": { "main": [[{ "node": "Build Brief Prompt", "type": "main", "index": 0 }]] },
+    "Build Brief Prompt": { "main": [[{ "node": "Sonnet Synthesis", "type": "main", "index": 0 }]] },
+    "Sonnet Synthesis": { "main": [[{ "node": "Extract Brief", "type": "main", "index": 0 }]] },
+    "Extract Brief": { "main": [[{ "node": "Deliver - Telegram or WhatsApp", "type": "main", "index": 0 }, { "node": "Deliver - Notion", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}
