@@ -1,0 +1,12 @@
+# Supabase project config for the CRM/relationship backbone (agent 3).
+# Only what we need to deploy edge functions from this repo lives here.
+# Real secrets are NEVER stored here — they're set with `supabase secrets set`
+# (see supabase/functions/crm-ingest/index.ts header).
+
+project_id = "wxkoetczqcpmnuyhsxvo"
+
+# Fireflies sends no Supabase JWT, so the webhook endpoint must skip JWT
+# verification. We verify Fireflies' own x-hub-signature in code instead
+# (when FIREFLIES_WEBHOOK_SECRET is set).
+[functions.crm-ingest]
+verify_jwt = false

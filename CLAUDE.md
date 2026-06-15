@@ -84,8 +84,25 @@ harden.sh            VPS hardening: UFW + SSH lockdown + fail2ban (idempotent)
 Makefile             make up / deploy / backup / import-workflow / export-workflows
 schemas/             shared action schema (the auto|approve|report contract)
 workflows/           exported workflow JSON (chief-of-staff.json, etc.)
+supabase/            CRM backbone edge functions (agent 3); see supabase/README.md
 README.md            the setup runbook, in order
 ```
+
+## The CRM backbone (agent 3) — Supabase, NOT n8n's Postgres
+
+Agent 3 (CRM / relationship) uses a **separate, hosted Supabase Postgres** as
+its source of truth — distinct from the n8n database in `docker-compose.yml`
+(which only backs the Chief of Staff brief queue). Schemas: `crm` (prod) +
+`crm_dev` (dev), with an `ingest_meeting(jsonb)` function. The DB schema is
+applied via the Supabase SQL Editor and is **not** version-controlled here.
+
+Meeting ingest runs as a **Supabase Edge Function** (`supabase/functions/crm-ingest`),
+not n8n: Fireflies "Summarized" webhook → Claude (Sonnet) synthesis →
+`ingest_meeting`. It lives in this repo, not the dashboard repo, because the
+Next.js build can't type-check Deno URL imports. A **separate Next.js dashboard**
+(repo `agents-dashboard`, deployed on Vercel) reads this backbone and runs the
+approve→send follow-up loop. Same hard rule applies everywhere: **secrets live
+in Supabase/Vercel/n8n config, never in any repo.**
 
 ## When building the workflow
 
