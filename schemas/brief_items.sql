@@ -22,3 +22,17 @@ CREATE TABLE IF NOT EXISTS brief_items (
 -- Fast lookup of the rows the morning brief still needs to include.
 CREATE INDEX IF NOT EXISTS idx_brief_items_pending
   ON brief_items (briefed, received_at);
+
+-- --- Executive Assistant (agent 2) reuse ------------------------------------
+-- The EA drafts replies to needs_reply items. To draft (and to thread the reply
+-- onto the right message) it needs the email body and a stable message id, which
+-- the Chief of Staff ingest now also stores. ea_drafted lets the EA track its own
+-- progress independently of `briefed` (the brief and the EA consume rows on
+-- different clocks). These are added idempotently so existing rows keep working.
+ALTER TABLE brief_items ADD COLUMN IF NOT EXISTS body        TEXT;
+ALTER TABLE brief_items ADD COLUMN IF NOT EXISTS message_id  TEXT;
+ALTER TABLE brief_items ADD COLUMN IF NOT EXISTS ea_drafted  BOOLEAN NOT NULL DEFAULT false;
+
+-- The rows the EA still needs to draft a reply for.
+CREATE INDEX IF NOT EXISTS idx_brief_items_ea_pending
+  ON brief_items (ea_drafted, classification, received_at);
