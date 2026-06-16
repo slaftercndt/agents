@@ -15,6 +15,12 @@ apply SQL through the Supabase SQL Editor.
 synthesis → `crm_dev.ingest_meeting(jsonb)`. Hosted in Supabase; fires when a
 call is **Summarized**. See the header of `index.ts` for the full flow.
 
+> ⚠️ **One function per slug.** `crm-ingest` was once clobbered by deploying an
+> unrelated scraper over the same slug — Fireflies webhooks then silently ran the
+> scraper and ingested nothing. Every function gets its OWN slug + its own
+> `functions/<slug>/` dir + its own `[functions.<slug>]` block in `config.toml`.
+> See `scrape-stats` for the standalone GiveSendGo scraper that now lives apart.
+
 It lives in **this** repo (backend), not the dashboard repo: the Next.js build
 type-checks `*.ts` and chokes on Deno URL imports, so keeping it here keeps the
 frontend build green.

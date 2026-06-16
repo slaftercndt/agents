@@ -10,3 +10,8 @@ project_id = "wxkoetczqcpmnuyhsxvo"
 # (when FIREFLIES_WEBHOOK_SECRET is set).
 [functions.crm-ingest]
 verify_jwt = false
+
+# scrape-stats is a standalone GiveSendGo fundraising scraper — unrelated to the
+# CRM. It runs on a schedule (pg_cron/pg_net) and sends no Supabase JWT.
+[functions.scrape-stats]
+verify_jwt = false
