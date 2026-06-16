@@ -191,18 +191,37 @@ Deno.serve(async (req) => {
   let body: any = {};
   try { body = JSON.parse(raw); } catch { /* ignore */ }
 
-  // Subscribed to Fireflies "Summarized" only, so any webhook here is wanted.
   const meetingId = body.meetingId;
   if (!meetingId) return new Response("ignored: no meetingId", { status: 200 });
 
+  // --- Event routing ---------------------------------------------------------
+  // Fireflies fires BOTH "transcript" and "summary"; the transcript usually
+  // lands first. We prefer the summary, but don't want to wait forever:
+  //   - transcript event  -> just record it; wait for the summary.
+  //   - summary event      -> ingest using the summary, clear the pending row.
+  //   - TranscriptFallback -> sent by the pg_cron sweep when a recorded
+  //                           transcript has waited > 10 min with no summary;
+  //                           ingest from the raw transcript.
+  const ev = (body.eventType ?? "").toString().toLowerCase();
+  const isTranscript = ev.includes("transcri") && !ev.includes("summ");
+  const isFallback   = ev.includes("fallback");
+
+  // Transcript event: queue and stop (no Claude call yet — costs nothing).
+  if (isTranscript) {
+    await sql`insert into crm_dev.pending_ingest (fireflies_id) values (${meetingId})
+              on conflict (fireflies_id) do nothing`;
+    return new Response(JSON.stringify({ ok: true, queued: true }),
+      { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+
   try {
-    // 1. Try the summary first (cheap).
+    // Summary path (or the cron fallback). Pull the summary first.
     const t = await ff(SUMMARY_QUERY, meetingId);
 
-    // 2. If the summary is void, fall back to the full transcript.
+    // Use the transcript if this is the cron fallback OR the summary is void.
     let userContent: string;
     let usedFallback = false;
-    if (summaryIsEmpty(t)) {
+    if (isFallback || summaryIsEmpty(t)) {
       const t2 = await ff(SENTENCES_QUERY, meetingId);
       userContent = userFromSentences(t2);
       usedFallback = true;
@@ -227,6 +246,9 @@ Deno.serve(async (req) => {
 
     const [{ interaction_id }] = await sql`
       select crm_dev.ingest_meeting(${ JSON.stringify(payload) }::jsonb) as interaction_id`;
+
+    // Ingested — remove any pending transcript row so the sweep skips it.
+    await sql`delete from crm_dev.pending_ingest where fireflies_id = ${meetingId}`;
 
     return new Response(JSON.stringify({ ok: true, interaction_id, via: usedFallback ? "transcript" : "summary" }),
       { status: 200, headers: { "Content-Type": "application/json" } });
