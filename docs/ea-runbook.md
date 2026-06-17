@@ -195,18 +195,38 @@ column so a re-run never double-files the same review item.
 ## Learning (a feedback loop, not a training loop)
 
 The EA does **not** retrain itself. It gets better through three deterministic,
-inspectable mechanisms:
+inspectable mechanisms, wired as a single `Fetch Context` node (Supabase cred)
+between `EA Read` and `Build Route Prompt`. The query returns **one row per
+email** (scalar subqueries) so it stays index-aligned with the email stream:
+
+```sql
+SELECT
+  (SELECT string_agg(coalesce(force_route,'') || ' ' || coalesce(tone_notes,''), '; ')
+     FROM crm_dev.ea_rules r
+     WHERE r.enabled
+       AND ( (r.match_type='email'   AND r.match_value = $1)
+          OR (r.match_type='domain'  AND $1 LIKE '%' || r.match_value)
+          OR (r.match_type='pattern' AND $1 ILIKE '%' || r.match_value || '%') )
+  ) AS rules,
+  (SELECT string_agg(left(detail, 500), E'\n---\n')
+     FROM (SELECT detail FROM crm_dev.ea_actions a
+            WHERE a.status = 'sent' AND a.payload->>'to' ILIKE '%' || $1 || '%'
+            ORDER BY a.executed_at DESC LIMIT 3) ex
+  ) AS examples;
+-- params: [ from_addr ]
+```
+
+`Build Route Prompt` (mode: Run Once for All Items) pairs `$('EA Read').all()[i]`
+with `$('Fetch Context').all()[i]` and injects `rules` / `examples` into the prompt.
 
 1. **Standing rules** — `crm_dev.ea_rules` (see `schemas/ea_rules.sql`): per
-   sender/domain/pattern, force a route (`always_ignore | always_task | draft_ok`)
-   and add tone notes. You curate these from the dashboard. Step "pull ea_rules"
-   in the workflow looks up matches for the sender and injects them into the prompt.
-2. **Few-shot from your own approved sends** — before drafting, SELECT the last
-   2–3 `ea_actions` rows for that sender with `status='sent'` and feed their bodies
-   as EXAMPLES. The more you approve, the more drafts sound like you — no training.
-3. **Outcome capture** — the dashboard already moves rows to `sent`/`discarded`;
-   keep the final edited body so #2 learns from what you actually sent, not the
-   first draft. (Optional: a `discarded` reason feeds rule-writing.)
+   sender/domain/pattern, force a route (`always_ignore | review | …`) and add tone
+   notes. Curated from the dashboard; the `Fetch Context` query injects matches.
+2. **Few-shot from your own approved sends** — the second subquery feeds the last
+   3 `ea_actions` rows for that sender with `status='sent'` as EXAMPLES. The more
+   you approve, the more drafts sound like you — no training.
+3. **Outcome capture** — the dashboard saves the final edited body back to the row
+   before marking it `sent`, so #2 learns from what you actually sent.
 
 ## Handoff to the dashboard session
 
