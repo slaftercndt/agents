@@ -1,0 +1,243 @@
+{
+  "id": "earouter00000001",
+  "active": false,
+  "name": "EA Router",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "id": "ea-schedule",
+      "name": "EA Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -160,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, account, priority, from_addr, subject, body, message_id FROM brief_items WHERE classification = 'needs_reply' AND ea_drafted = false ORDER BY priority ASC, received_at ASC LIMIT 20;",
+        "options": {}
+      },
+      "id": "ea-read",
+      "name": "EA Read",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        60,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const items = $input.all();\nconst out = [];\nfor (const item of items) {\n  const it = item.json;\n  const rules = '(none yet)';        // learning loop (Fetch Context) fills these later\n  const examples = '(none yet)';\n  const routeSystem =\n    \"You are an Executive Assistant triaging and handling one email for your principal. \" +\n    \"Decide ONE route, then act. Output STRICT JSON only - no prose, no fences:\\n\" +\n    \"{ \\\"route\\\": \\\"reply|review|task|fyi|ignore\\\", \\\"summary\\\": \\\"<=12 words\\\", \" +\n    \"\\\"reply_subject\\\": \\\"\\\", \\\"reply_body\\\": \\\"\\\", \\\"task_title\\\": \\\"\\\", \" +\n    \"\\\"due_date\\\": \\\"YYYY-MM-DD or empty\\\", \\\"why\\\": \\\"\\\" }\\n\" +\n    \"Routes: reply = a straightforward response you can draft; review = needs a human \" +\n    \"decision (proposal, contract, money, commitments); task = a to-do that is not an \" +\n    \"email; fyi = no action; ignore = not actually actionable.\\n\" +\n    \"Drafting: match the sender register, be concise, use ONLY facts in the email - \" +\n    \"never invent commitments, dates, numbers, or names. You DRAFT/PROPOSE only; a human sends.\\n\" +\n    \"Standing rules (obey these):\\n\" + rules;\n  const routeUser =\n    \"From: \" + (it.from_addr || '') + \"\\nSubject: \" + (it.subject || '') + \"\\n\\n\" +\n    (it.body || '') + \"\\n\\n--- How the principal has replied to this sender before ---\\n\" + examples;\n  out.push({ json: Object.assign({}, it, { routeSystem: routeSystem, routeUser: routeUser }) });\n}\nreturn out;"
+      },
+      "id": "ea-buildprompt",
+      "name": "Build Route Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1500, system: $json.routeSystem, messages: [{ role: 'user', content: $json.routeUser }] }) }}",
+        "options": {}
+      },
+      "id": "ea-sonnet",
+      "name": "Sonnet Route",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const src = $('Build Route Prompt').all();\nconst all = $input.all();\nconst out = [];\nfor (let i = 0; i < all.length; i++) {\n  const o = src[i] ? src[i].json : {};\n  const resp = all[i] ? all[i].json : {};\n  let text = '';\n  try { text = resp.content[0].text; } catch (e) {}\n  let d = { route: 'fyi', summary: o.subject || '' };\n  if (text) {\n    const m = text.replace(/```json|```/g, '').match(/\\{[\\s\\S]*\\}/);\n    if (m) { try { d = JSON.parse(m[0]); } catch (e) {} }\n  }\n  const route = (d.route || 'fyi').toLowerCase();\n  const base = { id: o.id, account: o.account, priority: o.priority,\n                 summary: d.summary || '', source_message_id: o.message_id || '' };\n  if (route === 'reply') {\n    out.push({ json: Object.assign({}, base, {\n      target: 'ea_actions', reply_body: d.reply_body || '',\n      payload: { to: [o.from_addr], subject: d.reply_subject || ('Re: ' + (o.subject || '')),\n                 body: d.reply_body || '', in_reply_to: o.message_id || null },\n      dedup_key: 'reply:' + (o.message_id || o.id) }) });\n  } else if (route === 'review') {\n    out.push({ json: Object.assign({}, base, {\n      target: 'attention', title: o.subject || 'Needs review', why: d.why || '',\n      dedup_key: 'review:' + (o.message_id || o.id) }) });\n  } else if (route === 'task') {\n    out.push({ json: Object.assign({}, base, {\n      target: 'tasks', task_title: d.task_title || (o.subject || 'Follow up'),\n      due_date: d.due_date || null }) });\n  } else {\n    out.push({ json: Object.assign({}, base, { target: 'none' }) });\n  }\n}\nreturn out;"
+      },
+      "id": "ea-parse",
+      "name": "Parse + route",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO crm_dev.ea_actions (type, account, priority, summary, detail, payload, source_message_id, dedup_key) SELECT 'email.draft', $1, $2, $3, $4, $5::jsonb, $6, $7 WHERE $8 = 'ea_actions' ON CONFLICT (dedup_key) DO NOTHING;",
+        "options": {
+          "queryReplacement": "={{ [$json.account, $json.priority, $json.summary, $json.reply_body || '', JSON.stringify($json.payload || {}), $json.source_message_id || '', $json.dedup_key || '', $json.target] }}"
+        }
+      },
+      "id": "ea-insert-reply",
+      "name": "Insert reply (ea_actions)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        980,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO crm_dev.attention (type, title, body, source, dedup_key) SELECT 'review', $1, $2, 'ea', $3 WHERE $4 = 'attention' ON CONFLICT (dedup_key) DO NOTHING;",
+        "options": {
+          "queryReplacement": "={{ [$json.title || $json.summary || 'Needs review', $json.why || '', $json.dedup_key || '', $json.target] }}"
+        }
+      },
+      "id": "ea-insert-review",
+      "name": "Insert review (attention)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        980,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO crm_dev.tasks (title, status, due_date, created_from) SELECT $1, 'open', $2, 'ea' WHERE $3 = 'tasks';",
+        "options": {
+          "queryReplacement": "={{ [$json.task_title || $json.summary || 'Follow up', $json.due_date || null, $json.target] }}"
+        }
+      },
+      "id": "ea-insert-task",
+      "name": "Insert task (tasks)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        980,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE brief_items SET ea_drafted = true WHERE id = $1;",
+        "options": {
+          "queryReplacement": "={{ [$json.id] }}"
+        }
+      },
+      "id": "ea-mark",
+      "name": "Mark drafted (brief_items)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        980,
+        600
+      ]
+    }
+  ],
+  "connections": {
+    "EA Schedule": {
+      "main": [
+        [
+          {
+            "node": "EA Read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EA Read": {
+      "main": [
+        [
+          {
+            "node": "Build Route Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Route Prompt": {
+      "main": [
+        [
+          {
+            "node": "Sonnet Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sonnet Route": {
+      "main": [
+        [
+          {
+            "node": "Parse + route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse + route": {
+      "main": [
+        [
+          {
+            "node": "Insert reply (ea_actions)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Insert review (attention)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Insert task (tasks)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Mark drafted (brief_items)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
