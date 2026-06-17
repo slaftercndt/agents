@@ -19,7 +19,7 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
-        -160,
+        -200,
         300
       ]
     },
@@ -34,21 +34,38 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        60,
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  (SELECT string_agg(coalesce(force_route,'') || ' ' || coalesce(tone_notes,''), '; ')\n     FROM crm_dev.ea_rules r\n     WHERE r.enabled\n       AND ( (r.match_type='email'   AND r.match_value = $1)\n          OR (r.match_type='domain'  AND $1 LIKE '%' || r.match_value)\n          OR (r.match_type='pattern' AND $1 ILIKE '%' || r.match_value || '%') )\n  ) AS rules,\n  (SELECT string_agg(left(detail, 500), E'\\n---\\n')\n     FROM (SELECT detail FROM crm_dev.ea_actions a\n            WHERE a.status = 'sent' AND a.payload->>'to' ILIKE '%' || $1 || '%'\n            ORDER BY a.executed_at DESC LIMIT 3) ex\n  ) AS examples;",
+        "options": {
+          "queryReplacement": "={{ [$json.from_addr] }}"
+        }
+      },
+      "id": "ea-context",
+      "name": "Fetch Context",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        200,
         300
       ]
     },
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const items = $input.all();\nconst out = [];\nfor (const item of items) {\n  const it = item.json;\n  const rules = '(none yet)';        // learning loop (Fetch Context) fills these later\n  const examples = '(none yet)';\n  const routeSystem =\n    \"You are an Executive Assistant triaging and handling one email for your principal. \" +\n    \"Decide ONE route, then act. Output STRICT JSON only - no prose, no fences:\\n\" +\n    \"{ \\\"route\\\": \\\"reply|review|task|fyi|ignore\\\", \\\"summary\\\": \\\"<=12 words\\\", \" +\n    \"\\\"reply_subject\\\": \\\"\\\", \\\"reply_body\\\": \\\"\\\", \\\"task_title\\\": \\\"\\\", \" +\n    \"\\\"due_date\\\": \\\"YYYY-MM-DD or empty\\\", \\\"why\\\": \\\"\\\" }\\n\" +\n    \"Routes: reply = a straightforward response you can draft; review = needs a human \" +\n    \"decision (proposal, contract, money, commitments); task = a to-do that is not an \" +\n    \"email; fyi = no action; ignore = not actually actionable.\\n\" +\n    \"Drafting: match the sender register, be concise, use ONLY facts in the email - \" +\n    \"never invent commitments, dates, numbers, or names. You DRAFT/PROPOSE only; a human sends.\\n\" +\n    \"Standing rules (obey these):\\n\" + rules;\n  const routeUser =\n    \"From: \" + (it.from_addr || '') + \"\\nSubject: \" + (it.subject || '') + \"\\n\\n\" +\n    (it.body || '') + \"\\n\\n--- How the principal has replied to this sender before ---\\n\" + examples;\n  out.push({ json: Object.assign({}, it, { routeSystem: routeSystem, routeUser: routeUser }) });\n}\nreturn out;"
+        "jsCode": "const emails = $('EA Read').all();\nconst ctx    = $('Fetch Context').all();   // 1:1 with emails (one row per email)\nconst out = [];\nfor (let i = 0; i < emails.length; i++) {\n  const it = emails[i].json;\n  const c  = ctx[i] ? ctx[i].json : {};\n  const rules    = c.rules    || '(none yet)';\n  const examples = c.examples || '(none yet)';\n  const routeSystem =\n    \"You are an Executive Assistant triaging and handling one email for your principal. \" +\n    \"Decide ONE route, then act. Output STRICT JSON only - no prose, no fences:\\n\" +\n    \"{ \\\"route\\\": \\\"reply|review|task|fyi|ignore\\\", \\\"summary\\\": \\\"<=12 words\\\", \" +\n    \"\\\"reply_subject\\\": \\\"\\\", \\\"reply_body\\\": \\\"\\\", \\\"task_title\\\": \\\"\\\", \" +\n    \"\\\"due_date\\\": \\\"YYYY-MM-DD or empty\\\", \\\"why\\\": \\\"\\\" }\\n\" +\n    \"Routes: reply = a straightforward response you can draft; review = needs a human \" +\n    \"decision (proposal, contract, money, commitments); task = a to-do that is not an \" +\n    \"email; fyi = no action; ignore = not actually actionable.\\n\" +\n    \"Drafting: match the sender register AND the EXAMPLES of how the principal writes; \" +\n    \"be concise; use ONLY facts in the email - never invent commitments, dates, numbers, \" +\n    \"or names. You DRAFT/PROPOSE only; a human sends.\\n\" +\n    \"Standing rules (obey these):\\n\" + rules;\n  const routeUser =\n    \"From: \" + (it.from_addr || '') + \"\\nSubject: \" + (it.subject || '') + \"\\n\\n\" +\n    (it.body || '') + \"\\n\\n--- How the principal has replied to this sender before ---\\n\" + examples;\n  out.push({ json: Object.assign({}, it, { routeSystem: routeSystem, routeUser: routeUser }) });\n}\nreturn out;"
       },
       "id": "ea-buildprompt",
       "name": "Build Route Prompt",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        280,
+        400,
         300
       ]
     },
@@ -77,7 +94,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        500,
+        600,
         300
       ]
     },
@@ -91,7 +108,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        720,
+        800,
         300
       ]
     },
@@ -108,7 +125,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        980,
+        1060,
         120
       ]
     },
@@ -125,7 +142,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        980,
+        1060,
         280
       ]
     },
@@ -142,7 +159,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        980,
+        1060,
         440
       ]
     },
@@ -159,7 +176,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        980,
+        1060,
         600
       ]
     }
@@ -177,6 +194,17 @@
       ]
     },
     "EA Read": {
+      "main": [
+        [
+          {
+            "node": "Fetch Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Context": {
       "main": [
         [
           {
