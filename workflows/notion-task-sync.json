@@ -1,0 +1,177 @@
+{
+  "id": "notiontasksync01",
+  "active": false,
+  "name": "Notion Task Sync",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "nts-schedule",
+      "name": "Every 15 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -160,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, title, description, status, due_date::text AS due_date, priority, notion_page_id, created_from FROM crm_dev.tasks WHERE notion_page_id IS NULL OR updated_at > coalesce(last_synced_at, 'epoch') ORDER BY updated_at ASC LIMIT 50;",
+        "options": {}
+      },
+      "id": "nts-read",
+      "name": "Read dirty tasks",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        60,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const DB = 'REPLACE_WITH_NOTION_TASKS_DB_ID';\nconst out = [];\nfor (const item of $input.all()) {\n  const t = item.json;\n  const props = {\n    Name:   { title: [ { text: { content: (t.title || 'Untitled task').slice(0, 200) } } ] },\n    Status: { select: { name: t.status || 'open' } },\n  };\n  if (t.due_date)     props.Due      = { date: { start: t.due_date } };\n  if (t.priority)     props.Priority = { select: { name: t.priority } };\n  if (t.created_from) props.Source   = { select: { name: t.created_from } };\n  if (t.description)  props.Notes    = { rich_text: [ { text: { content: (t.description || '').slice(0, 1900) } } ] };\n  const hasPage = !!t.notion_page_id;\n  const method = hasPage ? 'PATCH' : 'POST';\n  const url = hasPage ? ('https://api.notion.com/v1/pages/' + t.notion_page_id)\n                      : 'https://api.notion.com/v1/pages';\n  const body = hasPage ? { properties: props }\n                       : { parent: { database_id: DB }, properties: props };\n  out.push({ json: { task_id: t.id, method: method, url: url, body: body } });\n}\nreturn out;"
+      },
+      "id": "nts-prep",
+      "name": "Prep Notion call",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "={{ $json.method }}",
+        "url": "={{ $json.url }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2022-06-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      },
+      "id": "nts-upsert",
+      "name": "Notion upsert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const prep = $('Prep Notion call').all();\nconst resp = $input.all();\nconst out = [];\nfor (let i = 0; i < resp.length; i++) {\n  const task_id = prep[i] ? prep[i].json.task_id : null;\n  const r = resp[i] ? resp[i].json : {};\n  const page_id = r.id || null;\n  if (task_id && page_id) out.push({ json: { task_id: task_id, page_id: page_id } });\n}\nreturn out;"
+      },
+      "id": "nts-pair",
+      "name": "Pair writeback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE crm_dev.tasks SET notion_page_id = $1, last_synced_at = now() WHERE id = $2;",
+        "options": {
+          "queryReplacement": "={{ [$json.page_id, $json.task_id] }}"
+        }
+      },
+      "id": "nts-writeback",
+      "name": "Write back page id",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        940,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Every 15 min": {
+      "main": [
+        [
+          {
+            "node": "Read dirty tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read dirty tasks": {
+      "main": [
+        [
+          {
+            "node": "Prep Notion call",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep Notion call": {
+      "main": [
+        [
+          {
+            "node": "Notion upsert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notion upsert": {
+      "main": [
+        [
+          {
+            "node": "Pair writeback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pair writeback": {
+      "main": [
+        [
+          {
+            "node": "Write back page id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
