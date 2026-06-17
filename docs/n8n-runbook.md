@@ -70,6 +70,11 @@ test run; it just means the normalization missed that source's shape.
 
 ## Migration / ops gotchas (VPS)
 
+- **VPS access:** `ssh nathan@2.25.208.140` (repo lives at `~/agents`; run all
+  `docker compose` / `make` commands there). This is also what belongs in the real
+  gitignored `.env` as `VPS_SSH=nathan@2.25.208.140` so `make deploy` works.
+  Tailscale alternative if port 22 is later closed to the public internet:
+  the tailnet IP `100.80.159.16` (`ssh nathan@100.80.159.16`).
 - **Moving n8n between machines: migrate the DATABASE, don't rebuild.**
   `pg_dump` the source n8n DB → restore into the target → done. Fresh-start means
   re-importing workflows and re-entering every credential; only choose it if there's
