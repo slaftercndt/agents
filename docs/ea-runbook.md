@@ -228,6 +228,12 @@ with `$('Fetch Context').all()[i]` and injects `rules` / `examples` into the pro
 3. **Outcome capture** — the dashboard saves the final edited body back to the row
    before marking it `sent`, so #2 learns from what you actually sent.
 
+These three make the EA better at *drafting*. The next loop — capturing the
+**correction signal** (draft vs. what you sent, plus rejections) and **graduating**
+an action type from `approve` to `auto` once it's earned it — is the
+report→approve→auto ladder applied to the EA itself. See
+[`ea-feedback-loop.md`](./ea-feedback-loop.md) (schema: `schemas/ea_feedback.sql`).
+
 ## Handoff to the dashboard session
 
 The EA needs three surfaces + one execute path in the **agents-dashboard** repo:
