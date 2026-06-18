@@ -7,7 +7,11 @@
       "parameters": {
         "rule": {
           "interval": [
-            { "field": "days", "triggerAtHour": 5, "triggerAtMinute": 30 }
+            {
+              "field": "days",
+              "triggerAtHour": 5,
+              "triggerAtMinute": 30
+            }
           ]
         }
       },
@@ -15,7 +19,10 @@
       "name": "Daily 05:30",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [-120, 300]
+      "position": [
+        -120,
+        300
+      ]
     },
     {
       "parameters": {
@@ -27,18 +34,24 @@
       "name": "Get Pending Items",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
-      "position": [120, 300]
+      "position": [
+        120,
+        300
+      ]
     },
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Group queued items by account (GiveSendGo first) into ONE Sonnet prompt.\nconst items = $input.all().map(i => i.json);\nif (items.length === 0) {\n  return [{ json: { synthSystem: 'You are a Chief of Staff.', synthUser: 'There are no new items today. Reply with a single short line saying the inbox is clear.' } }];\n}\nconst order = { givesendgo: 1, gmail: 2, outlook: 3, nextcloud: 4 };\nitems.sort((a, b) => (a.priority - b.priority) || ((order[a.account] || 9) - (order[b.account] || 9)));\nconst byAccount = {};\nfor (const it of items) { (byAccount[it.account] = byAccount[it.account] || []).push(it); }\nconst accounts = Object.keys(byAccount).sort((a, b) => (order[a] || 9) - (order[b] || 9));\nlet input = '';\nfor (const acc of accounts) {\n  input += '\\n## ' + acc + '\\n';\n  for (const it of byAccount[acc]) {\n    input += '- [' + it.classification + '] ' + (it.from_addr || '') + ' \\u2014 ' + (it.subject || '') + ' :: ' + (it.one_line || '') + '\\n';\n  }\n}\nconst synthSystem = 'You are a Chief of Staff writing one concise daily morning brief. Group strictly by account in the order given. GiveSendGo Charities MUST appear first. Within each account, list needs_reply items before fyi. Be terse and scannable, markdown headers, no invented items.';\nconst synthUser = 'Write the morning brief from these triaged items, grouped by account (GiveSendGo first):\\n' + input;\nreturn [{ json: { synthSystem, synthUser } }];"
+        "jsCode": "const items  = $input.all().map(i => i.json);\nconst order  = { givesendgo: 1, commissioned: 2, gmail: 3, nextcloud: 4 };\nconst labels = { givesendgo: 'GiveSendGo', commissioned: 'Commissioned', gmail: 'Gmail', nextcloud: 'NextCloud' };\nif (items.length === 0) {\n  return [{ json: { synthSystem: 'You are a Chief of Staff.', synthUser: 'There are no new items today. Reply with a single short line saying the inbox is clear.' } }];\n}\nitems.sort((a, b) => (a.priority - b.priority) || ((order[a.account] || 9) - (order[b.account] || 9)));\nconst byAccount = {};\nfor (const it of items) { (byAccount[it.account] = byAccount[it.account] || []).push(it); }\nconst accounts = Object.keys(byAccount).sort((a, b) => (order[a] || 9) - (order[b] || 9));\nlet input = '';\nfor (const acc of accounts) {\n  input += '\\n## ' + (labels[acc] || acc) + '\\n';\n  for (const it of byAccount[acc]) {\n    input += '- [' + it.classification + '] ' + (it.from_addr || '') + ' \u2014 ' + (it.subject || '') + ' :: ' + (it.one_line || '') + '\\n';\n  }\n}\nconst synthSystem = 'You are a Chief of Staff writing one concise daily morning brief. Group strictly by account in the EXACT order given, using these headers: GiveSendGo, Commissioned, Gmail, NextCloud. GiveSendGo MUST appear first. Within each account, list needs_reply items before fyi. Be terse and scannable, keep the section headers, invent nothing.';\nconst synthUser = 'Write the morning brief from these triaged items, grouped by account in this order (GiveSendGo first):\\n' + input;\nreturn [{ json: { synthSystem, synthUser } }];"
       },
       "id": "node-buildprompt",
       "name": "Build Brief Prompt",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [360, 300]
+      "position": [
+        360,
+        300
+      ]
     },
     {
       "parameters": {
@@ -49,7 +62,10 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "anthropic-version", "value": "2023-06-01" }
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
           ]
         },
         "sendBody": true,
@@ -61,7 +77,10 @@
       "name": "Sonnet Synthesis",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [600, 300]
+      "position": [
+        600,
+        300
+      ]
     },
     {
       "parameters": {
@@ -72,7 +91,10 @@
       "name": "Extract Brief",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [840, 300]
+      "position": [
+        840,
+        300
+      ]
     },
     {
       "parameters": {
@@ -86,7 +108,10 @@
       "name": "Deliver - Telegram",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [1100, 160]
+      "position": [
+        1100,
+        160
+      ]
     },
     {
       "parameters": {
@@ -97,7 +122,10 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Notion-Version", "value": "2022-06-28" }
+            {
+              "name": "Notion-Version",
+              "value": "2022-06-28"
+            }
           ]
         },
         "sendBody": true,
@@ -109,7 +137,10 @@
       "name": "Deliver - Notion",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1100, 300]
+      "position": [
+        1100,
+        300
+      ]
     },
     {
       "parameters": {
@@ -121,22 +152,81 @@
       "name": "Mark Briefed",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
-      "position": [1100, 440]
+      "position": [
+        1100,
+        440
+      ]
     }
   ],
   "connections": {
-    "Daily 05:30": { "main": [[{ "node": "Get Pending Items", "type": "main", "index": 0 }]] },
-    "Get Pending Items": { "main": [[{ "node": "Build Brief Prompt", "type": "main", "index": 0 }]] },
-    "Build Brief Prompt": { "main": [[{ "node": "Sonnet Synthesis", "type": "main", "index": 0 }]] },
-    "Sonnet Synthesis": { "main": [[{ "node": "Extract Brief", "type": "main", "index": 0 }]] },
+    "Daily 05:30": {
+      "main": [
+        [
+          {
+            "node": "Get Pending Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Pending Items": {
+      "main": [
+        [
+          {
+            "node": "Build Brief Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Brief Prompt": {
+      "main": [
+        [
+          {
+            "node": "Sonnet Synthesis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sonnet Synthesis": {
+      "main": [
+        [
+          {
+            "node": "Extract Brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Extract Brief": {
-      "main": [[
-        { "node": "Deliver - Telegram", "type": "main", "index": 0 },
-        { "node": "Deliver - Notion", "type": "main", "index": 0 },
-        { "node": "Mark Briefed", "type": "main", "index": 0 }
-      ]]
+      "main": [
+        [
+          {
+            "node": "Deliver - Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Deliver - Notion",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Mark Briefed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
-  "settings": { "executionOrder": "v1" },
+  "settings": {
+    "executionOrder": "v1"
+  },
   "pinData": {}
 }
