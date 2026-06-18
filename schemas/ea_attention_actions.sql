@@ -15,24 +15,27 @@ declare s text;
 begin
   foreach s in array array['crm_dev','crm'] loop
 
+    -- `if exists`: a schema without an attention table yet (e.g. prod `crm`
+    -- before it's provisioned) is skipped instead of erroring.
+
     -- source email — so a review can be drafted/forwarded without re-fetching
-    execute format('alter table %I.attention add column if not exists from_addr         text;', s);
-    execute format('alter table %I.attention add column if not exists subject           text;', s);
-    execute format('alter table %I.attention add column if not exists source_body       text;', s);
-    execute format('alter table %I.attention add column if not exists source_message_id text;', s);
-    execute format('alter table %I.attention add column if not exists account           text;', s);
-    execute format('alter table %I.attention add column if not exists priority          integer not null default 3;', s);
+    execute format('alter table if exists %I.attention add column if not exists from_addr         text;', s);
+    execute format('alter table if exists %I.attention add column if not exists subject           text;', s);
+    execute format('alter table if exists %I.attention add column if not exists source_body       text;', s);
+    execute format('alter table if exists %I.attention add column if not exists source_message_id text;', s);
+    execute format('alter table if exists %I.attention add column if not exists account           text;', s);
+    execute format('alter table if exists %I.attention add column if not exists priority          integer not null default 3;', s);
 
     -- editable suggested next-action (what the EA proposes you do)
-    execute format('alter table %I.attention add column if not exists suggested_action  text;', s);
+    execute format('alter table if exists %I.attention add column if not exists suggested_action  text;', s);
 
     -- review -> draft: link to the ea_actions row the "Draft reply" action creates
-    execute format('alter table %I.attention add column if not exists linked_action_id  uuid;', s);
+    execute format('alter table if exists %I.attention add column if not exists linked_action_id  uuid;', s);
 
     -- forwarding ("Both": send the email out AND track who owns it now)
-    execute format('alter table %I.attention add column if not exists forwarded_to      text[];', s);
-    execute format('alter table %I.attention add column if not exists forwarded_at      timestamptz;', s);
-    execute format('alter table %I.attention add column if not exists assigned_to       text;', s);
+    execute format('alter table if exists %I.attention add column if not exists forwarded_to      text[];', s);
+    execute format('alter table if exists %I.attention add column if not exists forwarded_at      timestamptz;', s);
+    execute format('alter table if exists %I.attention add column if not exists assigned_to       text;', s);
 
   end loop;
 end $$;
