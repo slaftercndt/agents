@@ -36,3 +36,14 @@ ALTER TABLE brief_items ADD COLUMN IF NOT EXISTS ea_drafted  BOOLEAN NOT NULL DE
 -- The rows the EA still needs to draft a reply for.
 CREATE INDEX IF NOT EXISTS idx_brief_items_ea_pending
   ON brief_items (ea_drafted, classification, received_at);
+
+-- --- Dedup -------------------------------------------------------------------
+-- Re-running the ingest (the IMAP trigger fires repeatedly) was inserting the
+-- SAME email as a new row every time, inflating the "needs attention" count with
+-- duplicates. This partial unique index makes message_id the idempotency key.
+-- Partial (WHERE message_id IS NOT NULL) so legacy rows that never captured a
+-- message_id are unaffected. REQUIRES the ingest to (a) map message_id into the
+-- Save to Postgres node and (b) insert with ON CONFLICT (message_id) DO NOTHING.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_brief_items_message_id
+  ON brief_items (message_id)
+  WHERE message_id IS NOT NULL;
