@@ -158,7 +158,10 @@ async function synthesize(userContent: string): Promise<any> {
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
-      max_tokens: 3000,
+      // 3000 truncated the JSON on longer meetings, so JSON.parse failed and
+      // synthesis silently fell back to {} — no recap_email, no draft. 8000
+      // leaves ample room for the full people/tasks/recap payload.
+      max_tokens: 8000,
       system: SYNTH_SYSTEM,
       messages: [{ role: "user", content: userContent }],
     }),
