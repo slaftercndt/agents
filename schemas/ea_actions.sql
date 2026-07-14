@@ -27,7 +27,10 @@ create table if not exists crm_dev.ea_actions (
   status        text        not null default 'proposed'
                             check (status in ('proposed','approved','sent','executed','discarded','error')),
   account       text        check (account in
-                            ('givesendgo','gmail','outlook','nextcloud','fourth','calendar','other')),
+                            -- live today: 3 mailboxes + their calendars. Future
+                            -- mailboxes (outlook/nextcloud/…) get added here when
+                            -- they actually integrate — not before.
+                            ('givesendgo','commissioned','gmail','calendar')),
   priority      integer     not null default 3,            -- GiveSendGo = 1 (sorts first)
   summary       text        not null,                      -- one-line, human-readable
   detail        text,                                      -- the draft body / longer text
@@ -49,3 +52,15 @@ create index if not exists idx_ea_actions_pending
 -- table server-side with the service-role key (which bypasses RLS), exactly like
 -- follow_up_drafts. Leaving it without policies keeps the anon key locked out.
 alter table crm_dev.ea_actions enable row level security;
+
+-- --- Migration: align account CHECK with the live accounts --------------------
+-- The EA Router routes brief_items straight through, and one live account is
+-- 'commissioned' — which the original CHECK omitted, so every commissioned reply
+-- failed to insert (0 commissioned rows had ever landed). Live today is exactly
+-- givesendgo + commissioned + gmail, plus their calendars; the old placeholder
+-- values (outlook/nextcloud/fourth/other) integrated with nothing, so they're
+-- dropped. CREATE TABLE IF NOT EXISTS never updates a constraint on an existing
+-- table, so refresh it explicitly (idempotent). Apply for crm_dev and crm.
+alter table crm_dev.ea_actions drop constraint if exists ea_actions_account_check;
+alter table crm_dev.ea_actions add constraint ea_actions_account_check
+  check (account in ('givesendgo','commissioned','gmail','calendar'));
