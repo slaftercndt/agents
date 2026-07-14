@@ -197,12 +197,23 @@ Deno.serve(async (req) => {
   let body: any = {};
   try { body = JSON.parse(raw); } catch { /* ignore */ }
 
-  const meetingId = body.meetingId;
-  if (!meetingId) return json({ ok: false, ignored: "no meetingId" }, 200);
+  // Accept the meeting id under any of the shapes Fireflies has used, so a
+  // payload-format change can't silently drop every webhook. Log the shape when
+  // we still can't find one, so the next bad payload is visible in the logs.
+  const meetingId = body.meetingId ?? body.meeting_id
+    ?? body?.data?.meetingId ?? body?.data?.meeting_id ?? body?.id;
+  if (!meetingId) {
+    console.log("crm-ingest: no meetingId; keys=", JSON.stringify(Object.keys(body ?? {})),
+      "eventType=", body?.eventType);
+    return json({ ok: false, ignored: "no meetingId" }, 200);
+  }
 
   const ev = (body.eventType ?? "").toString().toLowerCase();
-  const isTranscript = ev.includes("transcri") && !ev.includes("summ");
   const isFallback   = ev.includes("fallback");
+  // "TranscriptFallback" (the sweep's retry event) contains "transcri", so it
+  // MUST be excluded here — otherwise isTranscript wins, the request is merely
+  // re-queued, and the sweep can never reach the synthesis path below.
+  const isTranscript = ev.includes("transcri") && !ev.includes("summ") && !isFallback;
 
   if (isTranscript) {
     await queue(meetingId);
