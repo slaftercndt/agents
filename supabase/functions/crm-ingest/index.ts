@@ -223,6 +223,17 @@ Deno.serve(async (req) => {
     return json({ ok: true, queued: true }, 200);
   }
 
+  // Honor a Fireflies rate-limit cooldown: while it's active, don't touch the
+  // Fireflies API at all — just keep the meeting queued for the sweep to retry
+  // after the window lifts. This is what stops the retry storm from re-burning
+  // the daily quota the instant it resets.
+  const [{ rate_limited_until }] = await sql`
+    select rate_limited_until from crm_dev.ingest_runtime where id`;
+  if (rate_limited_until && new Date(rate_limited_until) > new Date()) {
+    await queue(meetingId);
+    return json({ ok: false, pending: true, reason: "rate_limited_cooldown", until: rate_limited_until }, 202);
+  }
+
   try {
     const t = await ff(SUMMARY_QUERY, meetingId);
 
@@ -276,10 +287,30 @@ Deno.serve(async (req) => {
       select crm_dev.ingest_meeting(${ sql.json(payload) }::jsonb) as interaction_id`;
 
     await sql`delete from crm_dev.pending_ingest where fireflies_id = ${meetingId}`;
+    await sql`update crm_dev.ingest_runtime set rate_limited_until = null where id`;
 
     return json({ ok: true, interaction_id, via: usedFallback ? "transcript" : "summary" }, 200);
   } catch (e) {
+    const msg = String(e);
+    // Never drop a meeting on failure — leave it queued so the sweep retries it.
+    // (Previously a Fireflies error 500'd and the meeting was lost forever.)
+    try { await queue(meetingId); } catch { /* ignore */ }
+
+    // Fireflies daily-quota 429: record a cooldown so neither the webhook path
+    // nor the sweep calls Fireflies again until the limit resets.
+    if (/too_many_requests|too many requests|\b429\b/i.test(msg)) {
+      let until: string;
+      const epoch = msg.match(/"retryAfter":(\d+)/);          // epoch millis in the error body
+      const gmt = msg.match(/retry after ([^"\\]+GMT)/i);     // human "…GMT" fallback
+      if (epoch) until = new Date(Number(epoch[1])).toISOString();
+      else if (gmt && !isNaN(Date.parse(gmt[1]))) until = new Date(Date.parse(gmt[1])).toISOString();
+      else until = new Date(Date.now() + 60 * 60 * 1000).toISOString();  // default: 1h
+      await sql`update crm_dev.ingest_runtime set rate_limited_until = ${until} where id`;
+      console.error("crm-ingest rate-limited until", until);
+      return json({ ok: false, pending: true, reason: "rate_limited", until }, 202);
+    }
+
     console.error("crm-ingest failed:", e);
-    return json({ ok: false, error: String(e) }, 500);
+    return json({ ok: false, error: msg }, 500);
   }
 });
