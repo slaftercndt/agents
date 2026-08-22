@@ -82,7 +82,8 @@ Caddyfile            automatic-HTTPS reverse proxy for n8n
 .env.example         every variable the stack needs (placeholders only)
 harden.sh            VPS hardening: UFW + SSH lockdown + fail2ban (idempotent)
 Makefile             make up / deploy / backup / import-workflow / export-workflows
-schemas/             shared action schema (the auto|approve|report contract)
+schemas/             shared action schema (the auto|approve|report contract) + CRM SQL
+docs/                build specs (phase2-agents.md: EA replies, CoS upgrades, Media agent)
 workflows/           exported workflow JSON (chief-of-staff.json, etc.)
 supabase/            CRM backbone edge functions (agent 3); see supabase/README.md
 README.md            the setup runbook, in order
