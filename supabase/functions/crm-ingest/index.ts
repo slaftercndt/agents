@@ -310,6 +310,19 @@ Deno.serve(async (req) => {
       return json({ ok: false, pending: true, reason: "rate_limited", until }, 202);
     }
 
+    // Anthropic budget/rate errors get the same treatment: pause the whole
+    // pipeline until the stated reset instead of retrying into a dead key
+    // every 15 minutes (which is how the Aug 2026 outage became a storm).
+    if (/usage limits|regain access|rate_limit_error|overloaded_error/i.test(msg)) {
+      const m = msg.match(/regain access on ([0-9]{4}-[0-9]{2}-[0-9]{2}) at ([0-9]{2}:[0-9]{2}) UTC/i);
+      const until = m
+        ? new Date(`${m[1]}T${m[2]}:00Z`).toISOString()
+        : new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(); // unknown shape: pause 6h
+      await sql`update crm_dev.ingest_runtime set rate_limited_until = ${until} where id`;
+      console.error("crm-ingest paused (Anthropic limits) until", until);
+      return json({ ok: false, pending: true, reason: "anthropic_limited", until }, 202);
+    }
+
     console.error("crm-ingest failed:", e);
     return json({ ok: false, error: msg }, 500);
   }

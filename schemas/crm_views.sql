@@ -59,3 +59,15 @@ begin
 
   end loop;
 end $$;
+
+-- One-glance pipeline status (crm_dev only — pending_ingest/ingest_runtime are
+-- ingest-side singletons). THE first thing to check when data looks stale:
+-- stale data is almost always queued>0 + paused_until in the future, which
+-- means an upstream quota/budget limit — not a broken pipeline.
+create or replace view crm_dev.pipeline_health as
+select
+  (select count(*) from crm_dev.pending_ingest)                               as queued,
+  (select min(received_at) from crm_dev.pending_ingest)                       as oldest_queued,
+  (select max(created_at) from crm_dev.interactions where source='fireflies') as last_successful_ingest,
+  (select rate_limited_until from crm_dev.ingest_runtime where id)            as paused_until,
+  (select count(*) from crm_dev.follow_up_aging)                              as aging_drafts;
